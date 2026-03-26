@@ -2754,7 +2754,7 @@
       if (device.isConnected()) {
         try { return await device.readFile(`modes/${file}`); } catch { }
       }
-      const res = await fetch(`/py/modes/${file}`);
+      const res = await fetch(`./py/modes/${file}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.text();
     }
