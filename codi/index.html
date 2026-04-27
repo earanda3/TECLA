@@ -3168,14 +3168,20 @@
       localStorage.setItem('tecla-fw-type', e.target.value);
     });
     
-    // Init fw-type-select on boot — always start as 'musical' to avoid hiding tabs
+    // Init fw-type-select on boot — sync tab visibility without tab-navigation side effects
     const savedFwType = localStorage.getItem('tecla-fw-type') || 'musical';
     const fwSel = document.getElementById('fw-type-select');
     if (fwSel) {
       fwSel.value = savedFwType;
-      // Only fire change if macro, to avoid hiding tabs unnecessarily on musical mode
-      if (savedFwType === 'macro') {
-        fwSel.dispatchEvent(new Event('change'));
+      // Sync tab visibility directly (avoid firing full change event to prevent tab-navigation on boot)
+      const _initIsMacro = savedFwType === 'macro';
+      document.getElementById('nav-tab-macros').style.display = _initIsMacro ? '' : 'none';
+      ['modes', 'progressions', 'scales', 'simulator'].forEach(tab => {
+        const el = document.querySelector('.nav-tab[data-tab="' + tab + '"]');
+        if (el) el.style.display = _initIsMacro ? 'none' : '';
+      });
+      if (_initIsMacro) {
+        document.querySelector('.nav-tab[data-tab="macros"]').click();
       }
     }
 
