@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>T E C L A</title>
   <script src="https://cdn.jsdelivr.net/pyodide/v0.26.3/full/pyodide.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <style>
     * {
       margin: 0;
@@ -1822,7 +1823,8 @@
 
   <nav>
     <span class="nav-tab active" data-tab="keys" data-i18n="nav_keys">Tecles</span>
-    <span class="nav-tab" data-tab="modes" data-i18n="nav_modes">Modes i Escales</span>
+    <span class="nav-tab" data-tab="macros" id="nav-tab-macros" style="display:none;">Macros</span>
+    <span class="nav-tab" data-tab="modes" id="nav-tab-modes" data-i18n="nav_modes">Modes i Escales</span>
     <span class="nav-tab" data-tab="progressions" data-i18n="nav_progressions">Progressions</span>
     <span class="nav-tab" data-tab="scales" data-i18n="nav_scales">Escales</span>
     <span class="nav-tab" data-tab="simulator" data-i18n="nav_simulator">Simulador</span>
@@ -1832,7 +1834,53 @@
   </nav>
 
   <main>
+    <input type="file" id="fallback-config-input" accept=".json" style="display:none;">
 
+    <!-- ══ MACROS (TECLAT / STREAMDECK) ════════════════════════════ -->
+    <div class="tab-panel" id="tab-macros">
+      <div class="card" style="margin-bottom: 20px;">
+        <div class="card-title">Assignació de Tecles (Mode Macro)</div>
+        <p style="font-size:12px;color:var(--text2);margin-top:-6px;margin-bottom:16px;">
+          Configura cada botó perquè enviï una combinació de teclat o un control multimèdia a l'ordinador.
+        </p>
+        <div class="panel-grid cols2" id="macro-keys-grid">
+          <!-- Generat via JS -->
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Assignació de Potenciòmetres (Mode Macro)</div>
+        <div class="panel-grid cols3">
+          <div class="form-group">
+            <label>Potenciòmetre X (Esquerra)</label>
+            <select class="form-select" id="macro-pot-x">
+              <option value="none">Sense funció</option>
+              <option value="vol">Volum (+ / -)</option>
+              <option value="bright">Brillantor (+ / -)</option>
+              <option value="scroll">Scroll Vertical</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Potenciòmetre Y (Centre)</label>
+            <select class="form-select" id="macro-pot-y">
+              <option value="none">Sense funció</option>
+              <option value="vol">Volum (+ / -)</option>
+              <option value="bright">Brillantor (+ / -)</option>
+              <option value="scroll">Scroll Vertical</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Potenciòmetre Z (Dreta)</label>
+            <select class="form-select" id="macro-pot-z">
+              <option value="none">Sense funció</option>
+              <option value="vol">Volum (+ / -)</option>
+              <option value="bright">Brillantor (+ / -)</option>
+              <option value="scroll">Scroll Vertical</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn btn-primary" id="btn-save-macros" style="margin-top:20px;">Desar configuració de Macros</button>
+      </div>
+    </div>
     <!-- ══ TECLES ══════════════════════════════════════════════════ -->
     <div class="tab-panel active" id="tab-keys">
       <div class="bank-bar">
@@ -1989,6 +2037,15 @@
     <!-- ══ MODES I ESCALES ════════════════════════════════════════ -->
     <div class="tab-panel" id="tab-modes">
       <div class="panel-grid cols2">
+        <div class="card">
+          <div class="card-title">Tipus de Firmware</div>
+          <p style="font-size:12px;color:var(--text2);margin-top:-6px;margin-bottom:12px;">Escull el mode de funcionament del dispositiu.</p>
+          <select class="form-select" id="fw-type-select" style="margin-bottom:12px;">
+            <option value="musical">TECLA Musical (MIDI, Escales, Synth)</option>
+            <option value="macro">TECLA Macro (Teclat/Streamdeck, Controls PC)</option>
+          </select>
+        </div>
+
         <div class="card">
           <div class="card-title" data-i18n="card_modes_install">Modes a instal·lar al dispositiu</div>
           <div class="checklist" id="modes-list-check">
@@ -2281,7 +2338,10 @@
           <div style="display:flex;flex-direction:column;gap:8px">
             <label class="cb"><input type="checkbox" id="fw-preserve" checked><span style="font-size:12px" data-i18n="fw_preserve">Preservar
                 configuració existent</span></label>
-            <button class="btn btn-sm btn-primary" id="btn-install-fw" disabled data-i18n="btn_install_fw">Instal·lar / Actualitzar firmware</button>
+            <div style="display:flex; gap:8px;">
+            <button class="btn btn-sm btn-primary" id="btn-install-fw" disabled data-i18n="btn_install_fw" style="flex:1;">Instal·lar / Actualitzar firmware</button>
+            <button class="btn btn-sm" id="btn-download-fw-zip" style="display:none;" title="Descarregar ZIP manualment">📦 Baixar ZIP</button>
+          </div>
             <button class="btn btn-sm" id="btn-verify-fw" disabled data-i18n="btn_verify_fw">Verificar instal·lació</button>
           </div>
         </div>
@@ -2623,14 +2683,64 @@
       });
     });
     buildKeysGrid(); // async: populates selects, syncs bank select, restores saved values
+    buildMacroGrid();
     _builtKeys = true;
 
     // ── API compat ─────────────────────────────────────────────────
+    let isCompatMode = false;
     if (!('showDirectoryPicker' in window)) {
+      isCompatMode = true;
       const ns = document.getElementById('not-supported');
       ns.classList.add('show');
-      ns.textContent = '⚠ Cal Chrome o Edge per a File System Access API.';
-      btnConnect.disabled = true;
+      ns.innerHTML = '⚠ Mode de Compatibilitat: <a href="#" id="btn-compat-help" style="color:var(--accent);text-decoration:underline;cursor:pointer;">Més info</a>';
+      btnConnect.textContent = '📥 Importar JSON';
+      document.querySelectorAll('[id^="btn-save-"]').forEach(btn => {
+        if(btn.id === 'btn-save-custom-theme') return;
+        btn.textContent = '📥 Descarregar JSON';
+      });
+      document.getElementById('btn-download-fw-zip').style.display = '';
+      document.getElementById('btn-compat-help')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        alert('En navegadors sense suport per a File System Access API (com Safari o Firefox), no podem escriure al dispositiu directament.\\n\\nFes servir "Importar" per obrir el teu tecla_config.json, i "Descarregar" per desar-lo. Després, copia manualment el fitxer a la placa CIRCUITPY/config.\\nPel firmware, descarrega el ZIP sencer i descomprimeix-lo.');
+      });
+      
+      // Fallback file input listener
+      document.getElementById('fallback-config-input')?.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+          const text = await file.text();
+          const json = JSON.parse(text);
+          if (json.banks) {
+            _keysConfig = { ..._keysConfig, ...json };
+            _saveKeysConfig(_keysConfig);
+            _syncBankSelect();
+            if (typeof _populateGrid === 'function') _populateGrid();
+            log(`Configuració llegida de ${file.name}`, 'ok');
+            setConnected('Config Manual');
+          } else {
+             throw new Error('El format no sembla correcte');
+          }
+        } catch(err) {
+          log(`Error llegint JSON: ${err.message}`, 'err');
+        }
+      });
+    }
+
+    async function syncDeviceConfig() {
+      const cfgString = JSON.stringify(buildDeviceConfig(), null, 2);
+      if (isCompatMode) {
+        const blob = new Blob([cfgString], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = 'tecla_config.json'; a.click();
+        URL.revokeObjectURL(url);
+        log('Configuració descarregada. Arrossega tecla_config.json a CIRCUITPY/config.', 'ok');
+      } else if (device.isConnected()) {
+        try {
+          await device.writeFile('tecla_web_config.json', cfgString);
+          log('✓ Sincronitzat al dispositiu (tecla_web_config.json).', 'ok');
+        } catch (e) { log(`Error sincronitzant: ${e.message}`, 'warn'); }
+      }
     }
 
     // ── Log ────────────────────────────────────────────────────────
@@ -2716,6 +2826,10 @@
 
     // ── Connectar ─────────────────────────────────────────────────
     btnConnect.addEventListener('click', async () => {
+      if (isCompatMode) {
+        document.getElementById('fallback-config-input')?.click();
+        return;
+      }
       btnConnect.disabled = true;
       btnConnect.innerHTML = '<span class="spinner"></span> connectant…';
       const result = await device.connect();
@@ -2913,6 +3027,156 @@
       _loadBankIntoGrid(_keysConfig.currentBank);
     }
 
+    // ── Macro Mode ──────────────────────────────────────────────────
+    let _macroConfig = { keys: new Array(16).fill({type:'none'}), pots: ['none','none','none'] };
+    
+    function _saveMacroConfig() {
+      localStorage.setItem('tecla-macro-config', JSON.stringify(_macroConfig));
+    }
+    
+    function _loadMacroConfig() {
+      try {
+        const str = localStorage.getItem('tecla-macro-config');
+        if (str) {
+          const cfg = JSON.parse(str);
+          if (cfg.keys && cfg.keys.length === 16) _macroConfig = cfg;
+        }
+      } catch(e) {}
+    }
+    
+    function buildMacroGrid() {
+      _loadMacroConfig();
+      const grid = document.getElementById('macro-keys-grid');
+      if (!grid) return;
+      grid.innerHTML = '';
+      for (let i = 0; i < 16; i++) {
+        grid.innerHTML += `
+          <div class="form-group" style="background:var(--surface2); padding:10px; border-radius:6px;">
+            <label>Tecla ${i + 1}</label>
+            <div style="display:flex; gap:8px; margin-bottom:8px;">
+              <select class="form-select" id="macro-k${i}-type" style="flex:1;">
+                <option value="none">Desactivat</option>
+                <option value="key">Teclat</option>
+                <option value="media">Multimèdia</option>
+              </select>
+              <select class="form-select" id="macro-k${i}-val" style="flex:1;"></select>
+            </div>
+            <div id="macro-k${i}-mods" style="display:flex; gap:10px; font-size:11px;">
+              <label class="cb"><input type="checkbox" id="macro-k${i}-mod-ctrl"> Ctrl</label>
+              <label class="cb"><input type="checkbox" id="macro-k${i}-mod-shift"> Shift</label>
+              <label class="cb"><input type="checkbox" id="macro-k${i}-mod-alt"> Alt</label>
+              <label class="cb"><input type="checkbox" id="macro-k${i}-mod-cmd"> Cmd</label>
+            </div>
+          </div>
+        `;
+      }
+      
+      const keys = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z',
+                    '1','2','3','4','5','6','7','8','9','0','ENTER','ESCAPE','BACKSPACE','TAB','SPACE','MINUS','EQUALS',
+                    'F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F11','F12','UP_ARROW','DOWN_ARROW','LEFT_ARROW','RIGHT_ARROW'];
+      const media = [
+        {val:'PLAY_PAUSE', l:'Play/Pause'}, {val:'MUTE', l:'Mute'}, {val:'VOLUME_UP', l:'Pujar Volum'}, 
+        {val:'VOLUME_DOWN', l:'Baixar Volum'}, {val:'SCAN_NEXT_TRACK', l:'Següent'}, {val:'SCAN_PREVIOUS_TRACK', l:'Anterior'}
+      ];
+      
+      for (let i = 0; i < 16; i++) {
+        const typeSel = document.getElementById(`macro-k${i}-type`);
+        const valSel = document.getElementById(`macro-k${i}-val`);
+        const mods = document.getElementById(`macro-k${i}-mods`);
+        
+        typeSel.addEventListener('change', () => {
+          valSel.innerHTML = '';
+          if (typeSel.value === 'key') {
+            mods.style.display = 'flex';
+            keys.forEach(k => valSel.innerHTML += \`<option value="\${k}">\${k}</option>\`);
+          } else if (typeSel.value === 'media') {
+            mods.style.display = 'none';
+            media.forEach(m => valSel.innerHTML += \`<option value="\${m.val}">\${m.l}</option>\`);
+          } else {
+            valSel.style.display = 'none';
+            mods.style.display = 'none';
+            return;
+          }
+          valSel.style.display = 'block';
+          if(_macroConfig.keys[i].type === typeSel.value && _macroConfig.keys[i].val) {
+            valSel.value = _macroConfig.keys[i].val;
+          }
+        });
+        
+        // Load initial state
+        const cfg = _macroConfig.keys[i];
+        typeSel.value = cfg.type || 'none';
+        typeSel.dispatchEvent(new Event('change'));
+        if (cfg.type === 'key') {
+          document.getElementById(\`macro-k\${i}-mod-ctrl\`).checked = !!cfg.ctrl;
+          document.getElementById(\`macro-k\${i}-mod-shift\`).checked = !!cfg.shift;
+          document.getElementById(\`macro-k\${i}-mod-alt\`).checked = !!cfg.alt;
+          document.getElementById(\`macro-k\${i}-mod-cmd\`).checked = !!cfg.cmd;
+        }
+      }
+      
+      ['x','y','z'].forEach((axis, idx) => {
+        const sel = document.getElementById(\`macro-pot-\${axis}\`);
+        if (sel) sel.value = _macroConfig.pots[idx] || 'none';
+      });
+    }
+    
+    document.getElementById('btn-save-macros')?.addEventListener('click', async () => {
+      for (let i = 0; i < 16; i++) {
+        const type = document.getElementById(\`macro-k\${i}-type\`).value;
+        const cfg = { type };
+        if (type !== 'none') cfg.val = document.getElementById(\`macro-k\${i}-val\`).value;
+        if (type === 'key') {
+          cfg.ctrl = document.getElementById(\`macro-k\${i}-mod-ctrl\`).checked;
+          cfg.shift = document.getElementById(\`macro-k\${i}-mod-shift\`).checked;
+          cfg.alt = document.getElementById(\`macro-k\${i}-mod-alt\`).checked;
+          cfg.cmd = document.getElementById(\`macro-k\${i}-mod-cmd\`).checked;
+        }
+        _macroConfig.keys[i] = cfg;
+      }
+      _macroConfig.pots = [
+        document.getElementById('macro-pot-x').value,
+        document.getElementById('macro-pot-y').value,
+        document.getElementById('macro-pot-z').value
+      ];
+      _saveMacroConfig();
+      
+      const cfgString = JSON.stringify(_macroConfig, null, 2);
+      if (isCompatMode) {
+        triggerFallbackDownload('macro_config.json', cfgString);
+      } else if (device.isConnected()) {
+        try {
+          await device.writeFile('macro_config.json', cfgString);
+          log('✓ Configuració de Macros desada a la placa.', 'ok');
+        } catch (e) { log(\`Error desant macros: \${e.message}\`, 'warn'); }
+      }
+    });
+
+    document.getElementById('fw-type-select')?.addEventListener('change', (e) => {
+      const isMacro = e.target.value === 'macro';
+      // Toggle tabs
+      document.getElementById('nav-tab-macros').style.display = isMacro ? '' : 'none';
+      ['modes', 'progressions', 'scales', 'simulator'].forEach(tab => {
+        const el = document.querySelector(\`.nav-tab[data-tab="\${tab}"]\`);
+        if(el) el.style.display = isMacro ? 'none' : '';
+      });
+      // Switch to Macro tab automatically
+      if (isMacro) {
+        document.querySelector('.nav-tab[data-tab="macros"]').click();
+      } else {
+        document.querySelector('.nav-tab[data-tab="keys"]').click();
+      }
+      localStorage.setItem('tecla-fw-type', e.target.value);
+    });
+    
+    // Init fw-type-select on boot
+    const savedFwType = localStorage.getItem('tecla-fw-type') || 'musical';
+    const fwSel = document.getElementById('fw-type-select');
+    if (fwSel) {
+      fwSel.value = savedFwType;
+      fwSel.dispatchEvent(new Event('change'));
+    }
+
     // Wire bank controls once at startup (outside buildKeysGrid so they're always active)
     document.getElementById('bank-select')?.addEventListener('change', e => {
       _readGridIntoBank(_keysConfig.currentBank);
@@ -2954,12 +3218,7 @@
       const bank = _keysConfig.banks[_keysConfig.currentBank];
       const assigned = bank.modes.filter(Boolean).length;
       log(`Configuració desada: ${assigned} tecles assignades a '${bank.name}'.`, 'ok');
-      if (device.isConnected()) {
-        try {
-          await device.writeFile('tecla_web_config.json', JSON.stringify(buildDeviceConfig(), null, 2));
-          log('✓ Sincronitzat al dispositiu (tecla_web_config.json).', 'ok');
-        } catch (e) { log(`Error sincronitzant: ${e.message}`, 'warn'); }
-      }
+      await syncDeviceConfig();
     });
 
     function buildDeviceConfig() {
@@ -4362,6 +4621,64 @@
     document.getElementById('btn-flash-nuke')?.addEventListener('click', () => _installUF2('./firmware/flash_nuke.uf2', 'flash_nuke.uf2'));
     document.getElementById('btn-install-cp')?.addEventListener('click', () => _installUF2('./firmware/adafruit-circuitpython-raspberry_pi_pico-es-10.0.3.uf2', 'circuitpython.uf2'));
 
+    // ── Baixar Firmware com a ZIP (Fallback) ──────────────────────────
+    document.getElementById('btn-download-fw-zip')?.addEventListener('click', async () => {
+      _fwMsg('Preparant fitxer ZIP...'); _fwProgress(10);
+      try {
+        const zip = new JSZip();
+        // Check if we want Macro or Musical
+        const fwType = document.getElementById('fw-type-select')?.value || 'musical';
+        
+        // Ensure device_files_manifest.json contains what we need or we build it manually
+        // If we can't reliably read the manifest (or don't want to rely on the server), 
+        // we can fetch the manifest.
+        const res = await fetch('./device_files_manifest.json');
+        const manifest = await res.json();
+        
+        let files = manifest.files;
+        if (fwType === 'macro') {
+          // Macro specific exclusions/inclusions
+          // Add macro_main.py, ignore main.py
+          // For now, package everything, user can choose.
+        }
+        
+        let done = 0;
+        for (const relPath of files) {
+          try {
+            if (fwType === 'macro' && relPath === 'main.py') continue; // We will provide macro_main.py as main.py later
+            const isBinary = relPath.endsWith('.mpy');
+            const fileRes = await fetch(\`./device_files/\${relPath}\`);
+            const content = isBinary ? await fileRes.arrayBuffer() : await fileRes.text();
+            zip.file(relPath, content);
+          } catch(e) { console.warn("Failed to zip file:", relPath); }
+          done++;
+          _fwProgress(10 + Math.round((done / files.length) * 40));
+        }
+        
+        if (fwType === 'macro') {
+          // fetch the macro main and save as main.py
+          const mres = await fetch('./macro_main.py').catch(() => null);
+          if (mres && mres.ok) zip.file('main.py', await mres.text());
+          // save macro_config
+          zip.file('macro_config.json', JSON.stringify(_macroConfig, null, 2));
+        } else {
+          // save regular config
+          zip.file('config/tecla_config.json', JSON.stringify(buildDeviceConfig(), null, 2));
+        }
+        
+        _fwMsg('Generant ZIP...'); _fwProgress(80);
+        const blob = await zip.generateAsync({ type: 'blob' });
+        _fwProgress(100);
+        
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = \`TECLA_Firmware_\${fwType.toUpperCase()}.zip\`; a.click();
+        URL.revokeObjectURL(url);
+        _fwMsg('✓ ZIP descarregat. Descomprimeix-lo i copia el contingut al volum CIRCUITPY.', 'ok');
+      } catch (e) {
+        _fwMsg('Error creant ZIP: ' + e.message, 'err');
+      }
+    });
+
     // ── Instal·lar / Actualitzar firmware TECLA ──────────────────────
     document.getElementById('btn-install-fw')?.addEventListener('click', async () => {
       if (!device.isConnected()) { alert('Connecta el dispositiu (CIRCUITPY) a la pestanya "Tecles" primer.'); return; }
@@ -4383,11 +4700,13 @@
         const manifest = await manifestRes.json();
 
         // 2. Determine enabled modes
+        const fwType = document.getElementById('fw-type-select')?.value || 'musical';
         const mc = _loadModesConfig();
         const enabledSet = new Set(mc.enabled_modes || []);  // set of filenames like 'mode_einaudi.py'
         const ESSENTIAL_MODES = new Set(['base_mode.py', 'mode_manager.py', '__init__.py', 'mode_keyboard.py']);
 
         const filesToCopy = manifest.files.filter(relPath => {
+          if (fwType === 'macro' && relPath === 'main.py') return false; // Substituirem per macro_main
           const fname = relPath.split('/').pop();
           if (relPath.startsWith('modes/mode_') && relPath.endsWith('.py')) {
             if (ESSENTIAL_MODES.has(fname)) return true;
@@ -4395,6 +4714,10 @@
           }
           return true;
         });
+
+        if (fwType === 'macro') {
+          filesToCopy.push('macro_main.py');
+        }
 
         _fwMsg(`Preparant ${filesToCopy.length} fitxers…`); _fwProgress(3);
 
@@ -4439,13 +4762,21 @@
 
         // 7. Copy files
         let done = 0; const errors = [];
-        for (const relPath of filesToCopy) {
+        for (let relPath of filesToCopy) {
           _fwMsg(`Copiant ${relPath}…`);
           try {
-            const isBinary = relPath.endsWith('.mpy');
-            const res = await fetch(`./device_files/${relPath}`);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const content = isBinary ? await res.arrayBuffer() : await res.text();
+            let content;
+            if (relPath === 'macro_main.py') {
+              const res = await fetch('./macro_main.py');
+              if (!res.ok) throw new Error(`HTTP ${res.status}`);
+              content = await res.text();
+              relPath = 'main.py'; // Ho guardem com a main.py a la placa
+            } else {
+              const isBinary = relPath.endsWith('.mpy');
+              const res = await fetch(`./device_files/${relPath}`);
+              if (!res.ok) throw new Error(`HTTP ${res.status}`);
+              content = isBinary ? await res.arrayBuffer() : await res.text();
+            }
             
             // Retry logic for writing files to FAT32
             let writeAttempts = 0;
@@ -4466,14 +4797,18 @@
           _fwProgress(Math.round(5 + (done / filesToCopy.length) * 83));
         }
 
-        // 8. Write local config (from buildDeviceConfig) → config/tecla_config.json
+        // 8. Write config
         _fwMsg('Escrivint configuració…'); _fwProgress(90);
         try {
-          const cfgData = JSON.stringify(buildDeviceConfig(), null, 2);
-          await device.writeFile('config/tecla_config.json', cfgData);
+          if (fwType === 'macro') {
+            await device.writeFile('macro_config.json', JSON.stringify(_macroConfig, null, 2));
+          } else {
+            const cfgData = JSON.stringify(buildDeviceConfig(), null, 2);
+            await device.writeFile('config/tecla_config.json', cfgData);
+          }
         } catch (e) {
-          if (configBackup) { try { await device.writeFile('config/tecla_config.json', configBackup); } catch { } }
-          errors.push(`config/tecla_config.json: ${e.message}`);
+          if (configBackup && fwType !== 'macro') { try { await device.writeFile('config/tecla_config.json', configBackup); } catch { } }
+          errors.push(`config JSON: ${e.message}`);
         }
 
         // 8. Write version marker
